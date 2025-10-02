@@ -1,0 +1,23 @@
+{
+    "name": "pai-token",
+    "version": "1.0.0",
+    "description": "Proof of Work mining token with Linear Vesting System",
+    "main": "",
+    "scripts": {
+    },
+    "keywords": [
+        "ERC20",
+        "Proof of Work",
+        "Blockchain",
+        "Mining",
+        "AI",
+        "Vesting"
+    ],
+    "author": "",
+    "license": "",
+    "dependencies": {
+        "ethers": "^6.15.0"
+    },
+    "devDependencies": {
+    }
+}
