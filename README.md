@@ -1262,6 +1262,8 @@ This whitepaper is for reference only and does not constitute any investment adv
 - Email: <team@paitoken.com>
 - GitHub: github.com/paitokenuu
 - Discord: discord.gg/paitoken_uu
+- Twitter: twitter.com/paitoken_uu
+- Telegram: t.me/paitoken_uu
 
 ---
 
