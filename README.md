@@ -1260,7 +1260,7 @@ This whitepaper is for reference only and does not constitute any investment adv
 **Contact:**
 
 - Email: <team@paitoken.com>
-- GitHub: github.com/infinitegriduu
+- GitHub: github.com/paitokenuu
 - Discord: discord.gg/paitoken_uu
 
 ---
