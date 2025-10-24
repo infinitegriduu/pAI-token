@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 //@title pAI Token - Mineable AI-themed ERC20 Token using Proof Of Work + Linear Vesting
 //@notice Symbol: pAI | Name: Proof of AI | Decimals: 18
-//@dev Total supply: 100,000,000 pAI (49% initial allocation, 51% POW mined)
+//@dev Total supply: 150,000,000 pAI (66.67% initial allocation, 33.33% POW mined)
 
 // ============================================================================
 // Custom Errors (Gas Optimized)
@@ -74,16 +74,10 @@ interface IERC20Permit {
 // ============================================================================
 
 library ExtendedMath {
-    /**
-     * @dev Returns the smaller of two numbers
-     */
     function min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a < b ? a : b;
     }
 
-    /**
-     * @dev Limits a value to be less than a maximum
-     */
     function limitLessThan(
         uint256 a,
         uint256 b
@@ -93,21 +87,12 @@ library ExtendedMath {
 }
 
 library ECRecover {
-    /**
-     * @notice Recover signer's address from a signed message
-     * @param digest Keccak-256 hash digest of the signed message
-     * @param v v of the signature
-     * @param r r of the signature
-     * @param s s of the signature
-     * @return Signer address
-     */
     function recover(
         bytes32 digest,
         uint8 v,
         bytes32 r,
         bytes32 s
     ) internal pure returns (address) {
-        // Validate signature parameters
         if (
             uint256(s) >
             0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
@@ -128,9 +113,6 @@ library ECRecover {
 }
 
 library EIP712 {
-    /**
-     * @notice Make EIP712 domain separator
-     */
     function makeDomainSeparator(
         string memory name,
         string memory version,
@@ -150,9 +132,6 @@ library EIP712 {
             );
     }
 
-    /**
-     * @notice Recover signer's address from an EIP712 signature
-     */
     function recover(
         bytes32 domainSeparator,
         uint8 v,
@@ -200,15 +179,31 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         );
     mapping(address => uint256) private _nonces;
 
+    // ========================================================================
+    // Supply Distribution Constants
+    // ========================================================================
+
+    uint256 public constant MAXIMUM_SUPPLY = 150_000_000 * 10 ** 18; // 150M pAI
+    uint256 public constant INITIAL_ALLOCATION = 100_000_000 * 10 ** 18; // 100M pAI (66.67%)
+    uint256 public constant MINEABLE_SUPPLY = 50_000_000 * 10 ** 18; // 50M pAI (33.33%)
+
+    /// @notice Traditional PoW allocation (instant rewards)
+    uint256 public constant POW_ALLOCATION = 40_000_000 * 10 ** 18; // 40M pAI (80% of mineable)
+
+    /// @notice Linear vesting pool allocation
+    uint256 public constant VESTING_POOL_ALLOCATION = 10_000_000 * 10 ** 18; // 10M pAI (20% of mineable)
+
+    // Total mineable: 40M + 10M = 50M ✅
+
+    // ========================================================================
     // POW Mining State
-    uint256 public constant MAXIMUM_SUPPLY = 100_000_000 * 10 ** 18; // 100M pAI
-    uint256 public constant INITIAL_ALLOCATION = 49_000_000 * 10 ** 18; // 49M pAI (49%)
-    uint256 public constant MINEABLE_SUPPLY = 51_000_000 * 10 ** 18; // 51M pAI (51%)
-    uint256 public constant BLOCKS_PER_READJUSTMENT = 2048; // difficulty adjustment period
-    uint256 public constant MINIMUM_TARGET = 2 ** 16; // hardest
-    uint256 public constant MAXIMUM_TARGET = 2 ** 234; // easiest
+    // ========================================================================
+
+    uint256 public constant BLOCKS_PER_READJUSTMENT = 2048;
+    uint256 public constant MINIMUM_TARGET = 2 ** 16;
+    uint256 public constant MAXIMUM_TARGET = 2 ** 234;
     uint256 public constant TARGET_BLOCKS_PER_PERIOD =
-        BLOCKS_PER_READJUSTMENT * 40; // Target: 40 ETH blocks per pAI block
+        BLOCKS_PER_READJUSTMENT * 40;
 
     uint256 public miningTarget;
     bytes32 public challengeNumber;
@@ -220,45 +215,30 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
     uint256 public latestDifficultyPeriodStarted;
     uint256 public lastRewardEthBlockNumber;
 
-    // Mining Diagnostics
     address public lastRewardTo;
     uint256 public lastRewardAmount;
 
-    // Initial allocation recipient (will renounce after receiving)
     address public immutable initialRecipient;
 
     // ========================================================================
     // Linear Vesting Mining System
     // ========================================================================
 
-    /// @notice Daily vesting reward per active miner
-    uint256 public constant DAILY_VESTING_REWARD = 0.5 * 10 ** 18; // 0.5 pAI/day
-
-    /// @notice Minimum hash power submissions required per day to claim full reward
+    uint256 public constant DAILY_VESTING_REWARD = 0.5 * 10 ** 18;
     uint256 public constant REQUIRED_DAILY_HASH_POWER = 10;
 
-    /// @notice Vesting pool allocation (from mineable supply)
-    uint256 public constant VESTING_POOL_ALLOCATION = 10_000_000 * 10 ** 18; // 10M pAI (19.6% of mineable)
-
-    /// @notice Traditional PoW allocation (remaining mineable supply)
-    uint256 public constant POW_ALLOCATION = 41_000_000 * 10 ** 18; // 41M pAI (80.4% of mineable)
-
-    /// @notice Total vesting rewards claimed
     uint256 public totalVestingClaimed;
+    uint256 public totalActiveMiners;
 
-    /// @notice Miner stake information
     struct MinerStake {
-        uint256 lastClaimTime; // Last time miner claimed vesting rewards
-        uint256 accumulatedHashPower; // Accumulated valid PoW submissions since last claim
-        uint256 totalVestingClaimed; // Total vesting rewards claimed by miner
-        uint256 totalHashPowerSubmitted; // Lifetime hash power submissions
-        uint256 firstSubmissionTime; // First time miner submitted hash power
+        uint256 lastClaimTime;
+        uint256 accumulatedHashPower;
+        uint256 totalVestingClaimed;
+        uint256 totalHashPowerSubmitted;
+        uint256 firstSubmissionTime;
     }
 
     mapping(address => MinerStake) public minerStakes;
-
-    /// @notice Total active miners (ever submitted at least once)
-    uint256 public totalActiveMiners;
 
     // ========================================================================
     // Events
@@ -270,24 +250,18 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         uint256 epochCount,
         bytes32 newChallengeNumber
     );
-
     event DifficultyAdjusted(
         uint256 oldTarget,
         uint256 newTarget,
         uint256 ethBlocksSinceLastAdjustment
     );
-
     event EraTransition(uint256 newEra, uint256 newReward);
-
     event InitialAllocation(address indexed recipient, uint256 amount);
-
-    // Vesting events
     event HashPowerSubmitted(
         address indexed miner,
         uint256 hashPower,
         uint256 totalHashPower
     );
-
     event VestingRewardClaimed(
         address indexed miner,
         uint256 amount,
@@ -304,29 +278,23 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
 
         initialRecipient = _initialRecipient;
 
-        // Initialize EIP-712 domain separator
         DOMAIN_SEPARATOR = EIP712.makeDomainSeparator(
             name,
             version,
             address(this)
         );
 
-        // Mint 49% initial allocation
         _mint(_initialRecipient, INITIAL_ALLOCATION);
         emit InitialAllocation(_initialRecipient, INITIAL_ALLOCATION);
 
-        // Initialize mining parameters for remaining 51%
         miningTarget = MAXIMUM_TARGET;
         challengeNumber = blockhash(block.number - 1);
         rewardEra = 0;
-        currentMiningReward = 100 * 10 ** decimals; // Initial: 100 pAI per block
-
-        // Adjust max supply for era to account for vesting pool
-        maxSupplyForEra = INITIAL_ALLOCATION + (POW_ALLOCATION / 2); // 49M + 20.5M = 69.5M
-
+        currentMiningReward = 100 * 10 ** decimals;
+        maxSupplyForEra = INITIAL_ALLOCATION + (POW_ALLOCATION / 2); // 100M + 20M = 120M
         latestDifficultyPeriodStarted = block.number;
         epochCount = 0;
-        tokensMinted = 0; // Only counts traditional PoW mined tokens
+        tokensMinted = 0;
     }
 
     // ========================================================================
@@ -451,21 +419,10 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
     // POW Mining Functions (Traditional)
     // ========================================================================
 
-    /**
-     * @notice Mine new pAI tokens with Proof of Work (traditional instant reward)
-     * @param nonce The mining nonce that satisfies the difficulty requirement
-     * @return success Whether the mining was successful
-     */
     function mint(uint256 nonce) external returns (bool success) {
         return _mintTo(nonce, msg.sender);
     }
 
-    /**
-     * @notice Mine new pAI tokens to a specific address
-     * @param nonce The mining nonce
-     * @param minter Address to receive the mining reward
-     * @return success Whether the mining was successful
-     */
     function mintTo(
         uint256 nonce,
         address minter
@@ -476,7 +433,6 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
     function _mintTo(uint256 nonce, address minter) internal returns (bool) {
         if (minter == address(0)) revert ZeroAddress();
 
-        // Verify Proof of Work
         bytes32 digest = keccak256(
             abi.encodePacked(
                 keccak256(abi.encodePacked(challengeNumber, minter, nonce))
@@ -484,29 +440,21 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         );
 
         if (uint256(digest) > miningTarget) revert InvalidProofOfWork();
-
-        // Prevent double mining in same block
         if (lastRewardEthBlockNumber == block.number)
             revert AlreadyMinedInBlock();
-
-        // Check supply cap (using POW_ALLOCATION instead of MINEABLE_SUPPLY)
-        if (tokensMinted + currentMiningReward > maxSupplyForEra) {
+        if (tokensMinted + currentMiningReward > maxSupplyForEra)
             revert MaxSupplyExceeded();
-        }
 
-        // Mint reward
         _mint(minter, currentMiningReward);
 
         unchecked {
             tokensMinted += currentMiningReward;
         }
 
-        // Update diagnostics
         lastRewardTo = minter;
         lastRewardAmount = currentMiningReward;
         lastRewardEthBlockNumber = block.number;
 
-        // Start new epoch
         _startNewMiningEpoch();
 
         emit Mint(minter, currentMiningReward, epochCount, challengeNumber);
@@ -514,11 +462,7 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         return true;
     }
 
-    /**
-     * @dev Start a new mining epoch and adjust difficulty if needed
-     */
     function _startNewMiningEpoch() internal {
-        // Check for era transition (halving) - only for traditional PoW allocation
         if (
             totalSupply + currentMiningReward > maxSupplyForEra && rewardEra < 7
         ) {
@@ -526,10 +470,9 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
                 rewardEra++;
             }
 
-            currentMiningReward = (100 * 10 ** decimals) / (2 ** rewardEra);
+            currentMiningReward = currentMiningReward / 2;
             maxSupplyForEra =
-                INITIAL_ALLOCATION +
-                POW_ALLOCATION -
+                maxSupplyForEra +
                 (POW_ALLOCATION / (2 ** (rewardEra + 1)));
 
             emit EraTransition(rewardEra, currentMiningReward);
@@ -539,7 +482,6 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
             epochCount++;
         }
 
-        // Adjust difficulty every BLOCKS_PER_READJUSTMENT epochs
         if (epochCount % BLOCKS_PER_READJUSTMENT == 0) {
             uint256 ethBlocksSinceLastAdjustment;
             unchecked {
@@ -550,18 +492,13 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
             _reAdjustDifficulty(ethBlocksSinceLastAdjustment);
         }
 
-        // Update challenge number
         challengeNumber = blockhash(block.number - 1);
     }
 
-    /**
-     * @dev Adjust mining difficulty based on actual vs target block time
-     */
     function _reAdjustDifficulty(uint256 ethBlocksSinceLastPeriod) internal {
         uint256 oldTarget = miningTarget;
 
         if (ethBlocksSinceLastPeriod < TARGET_BLOCKS_PER_PERIOD) {
-            // Mining too fast - increase difficulty (decrease target)
             uint256 excessBlockPct = (TARGET_BLOCKS_PER_PERIOD * 100) /
                 ethBlocksSinceLastPeriod;
             uint256 excessBlockPctExtra = (excessBlockPct - 100).limitLessThan(
@@ -569,21 +506,19 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
             );
 
             unchecked {
-                miningTarget -= (miningTarget / 2000) * excessBlockPctExtra; // Max 50% decrease
+                miningTarget -= (miningTarget / 2000) * excessBlockPctExtra;
             }
         } else {
-            // Mining too slow - decrease difficulty (increase target)
             uint256 shortageBlockPct = (ethBlocksSinceLastPeriod * 100) /
                 TARGET_BLOCKS_PER_PERIOD;
             uint256 shortageBlockPctExtra = (shortageBlockPct - 100)
                 .limitLessThan(1000);
 
             unchecked {
-                miningTarget += (miningTarget / 2000) * shortageBlockPctExtra; // Max 50% increase
+                miningTarget += (miningTarget / 2000) * shortageBlockPctExtra;
             }
         }
 
-        // Enforce bounds
         if (miningTarget < MINIMUM_TARGET) {
             miningTarget = MINIMUM_TARGET;
         }
@@ -604,22 +539,10 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
     // Linear Vesting Mining Functions
     // ========================================================================
 
-    /**
-     * @notice Submit hash power proof without receiving immediate reward
-     * @dev Miners accumulate hash power to claim vesting rewards later
-     * @param nonce The mining nonce that satisfies the difficulty requirement
-     * @return success Whether the submission was successful
-     */
     function submitHashPower(uint256 nonce) external returns (bool success) {
         return _submitHashPower(nonce, msg.sender);
     }
 
-    /**
-     * @notice Submit hash power for another address
-     * @param nonce The mining nonce
-     * @param miner Address to credit the hash power to
-     * @return success Whether the submission was successful
-     */
     function submitHashPowerFor(
         uint256 nonce,
         address miner
@@ -633,7 +556,6 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
     ) internal returns (bool) {
         if (miner == address(0)) revert ZeroAddress();
 
-        // Verify Proof of Work (same difficulty as traditional mining)
         bytes32 digest = keccak256(
             abi.encodePacked(
                 keccak256(abi.encodePacked(challengeNumber, miner, nonce))
@@ -641,14 +563,11 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         );
 
         if (uint256(digest) > miningTarget) revert InvalidProofOfWork();
-
-        // Prevent double submission in same block
         if (lastRewardEthBlockNumber == block.number)
             revert AlreadyMinedInBlock();
 
         MinerStake storage stake = minerStakes[miner];
 
-        // Track first-time miners
         if (stake.firstSubmissionTime == 0) {
             stake.firstSubmissionTime = block.timestamp;
             stake.lastClaimTime = block.timestamp;
@@ -657,16 +576,12 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
             }
         }
 
-        // Increment hash power
         unchecked {
             stake.accumulatedHashPower++;
             stake.totalHashPowerSubmitted++;
         }
 
-        // Update last mining block (prevent double mining)
         lastRewardEthBlockNumber = block.number;
-
-        // Update challenge for next submission
         challengeNumber = blockhash(block.number - 1);
 
         emit HashPowerSubmitted(miner, 1, stake.accumulatedHashPower);
@@ -674,18 +589,11 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         return true;
     }
 
-    /**
-     * @notice Claim accumulated vesting rewards based on time and hash power
-     * @dev Calculates rewards linearly: days_passed * DAILY_VESTING_REWARD
-     * @return amount Amount of pAI claimed
-     */
     function claimVestingReward() external returns (uint256 amount) {
         MinerStake storage stake = minerStakes[msg.sender];
 
-        // Must have submitted at least once
         if (stake.firstSubmissionTime == 0) revert InsufficientHashPower();
 
-        // Calculate time passed since last claim
         uint256 timeSinceLastClaim;
         unchecked {
             timeSinceLastClaim = block.timestamp - stake.lastClaimTime;
@@ -694,43 +602,34 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         if (timeSinceLastClaim < 1 days) revert TooSoonToClaim();
 
         uint256 daysPassed = timeSinceLastClaim / 1 days;
-
-        // Calculate base reward (linear vesting)
         uint256 baseReward = daysPassed * DAILY_VESTING_REWARD;
-
-        // Calculate required hash power for full reward
         uint256 requiredHashPower = daysPassed * REQUIRED_DAILY_HASH_POWER;
 
-        // Apply hash power penalty if insufficient
         uint256 actualReward = baseReward;
         if (stake.accumulatedHashPower < requiredHashPower) {
-            // Proportional reduction: (actual / required) * baseReward
             actualReward =
                 (baseReward * stake.accumulatedHashPower) /
                 requiredHashPower;
         }
 
-        // Check vesting pool availability
         if (totalVestingClaimed + actualReward > VESTING_POOL_ALLOCATION) {
             revert VestingPoolDepleted();
         }
 
-        // Mint vesting reward
         _mint(msg.sender, actualReward);
 
-        // Update state
         unchecked {
             totalVestingClaimed += actualReward;
             stake.totalVestingClaimed += actualReward;
         }
         stake.lastClaimTime = block.timestamp;
-        stake.accumulatedHashPower = 0; // Reset hash power counter
+        stake.accumulatedHashPower = 0;
 
         emit VestingRewardClaimed(
             msg.sender,
             actualReward,
             daysPassed,
-            stake.accumulatedHashPower
+            requiredHashPower
         );
 
         return actualReward;
@@ -756,9 +655,6 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         return currentMiningReward;
     }
 
-    /**
-     * @notice Get comprehensive mining statistics
-     */
     struct MiningStats {
         uint256 currentReward;
         uint256 difficulty;
@@ -793,10 +689,6 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
         stats.totalActiveMiners = totalActiveMiners;
     }
 
-    /**
-     * @notice Get miner's vesting statistics
-     * @param miner Address of the miner
-     */
     struct MinerVestingStats {
         uint256 accumulatedHashPower;
         uint256 totalVestingClaimed;
@@ -821,36 +713,26 @@ contract pAIToken is IERC20, IERC20Metadata, IERC20Permit {
 
         if (stake.lastClaimTime > 0) {
             uint256 timeSinceLastClaim = block.timestamp - stake.lastClaimTime;
-            stats.daysSinceLastClaim = timeSinceLastClaim / 1 days;
-
-            if (stats.daysSinceLastClaim > 0) {
-                uint256 baseReward = stats.daysSinceLastClaim *
-                    DAILY_VESTING_REWARD;
-                stats.requiredHashPowerForFullReward =
-                    stats.daysSinceLastClaim *
+            if (timeSinceLastClaim >= 1 days) {
+                uint256 daysPassed = timeSinceLastClaim / 1 days;
+                uint256 baseReward = daysPassed * DAILY_VESTING_REWARD;
+                uint256 requiredHashPower = daysPassed *
                     REQUIRED_DAILY_HASH_POWER;
 
-                // Calculate pending reward with hash power penalty
-                if (
-                    stake.accumulatedHashPower <
-                    stats.requiredHashPowerForFullReward
-                ) {
+                stats.daysSinceLastClaim = daysPassed;
+                stats.requiredHashPowerForFullReward = requiredHashPower;
+
+                if (stake.accumulatedHashPower >= requiredHashPower) {
+                    stats.pendingReward = baseReward;
+                } else {
                     stats.pendingReward =
                         (baseReward * stake.accumulatedHashPower) /
-                        stats.requiredHashPowerForFullReward;
-                } else {
-                    stats.pendingReward = baseReward;
+                        requiredHashPower;
                 }
             }
         }
     }
 
-    /**
-     * @notice Check if a nonce would be a valid solution
-     * @param nonce The nonce to test
-     * @param miner The miner address
-     * @return isValid Whether this would be a valid solution
-     */
     function checkMintSolution(
         uint256 nonce,
         address miner
