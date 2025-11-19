@@ -1078,7 +1078,6 @@ The pAI team assumes no responsibility for any investment losses.
 - **Email**: <team@paitoken.com>
 - **Twitter**: twitter.com/paitoken_uu
 - **Telegram**: t.me/paitoken_uu
-- **Discord**: discord.gg/paitoken_uu
 
 ---
 
